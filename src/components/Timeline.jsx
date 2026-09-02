@@ -106,9 +106,9 @@ export default function Timeline({ events, cursor, setCursor, playing, setPlayin
           ))}
         </select>
 
-        <label className="live" title="jump to the end when new events arrive">
+        <label className="live" title="keep the open session on its newest event">
           <input type="checkbox" checked={!!follow} onChange={(e) => setFollow?.(e.target.checked)} />
-          Follow
+          Follow latest
         </label>
 
         <span className="tl-time">

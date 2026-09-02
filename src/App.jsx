@@ -32,11 +32,11 @@ export default function App() {
   const fpRef = useRef(null);
   const pulseFpRef = useRef(null);
   const activeRef = useRef(null);
-  const graphRef = useRef(null);
-  const cursorRef = useRef(0);
+  const sessionsRef = useRef([]);
+  const followRef = useRef(true);
   activeRef.current = active;
-  graphRef.current = graph;
-  cursorRef.current = cursor;
+  sessionsRef.current = sessions;
+  followRef.current = follow;
 
   useEffect(() => { localStorage.setItem(STORE, JSON.stringify(roots)); }, [roots]);
 
@@ -55,7 +55,7 @@ export default function App() {
       const list = d.sessions || [];
 
       if (fpRef.current && d.fingerprint !== fpRef.current) {
-        const prev = new Map(sessions.map((s) => [s.file, s.mtime]));
+        const prev = new Map(sessionsRef.current.map((s) => [s.file, s.mtime]));
         const changed = new Set();
         for (const s of list) if (!prev.has(s.file) || prev.get(s.file) !== s.mtime) changed.add(s.file);
         if (changed.size) {
@@ -64,6 +64,7 @@ export default function App() {
         }
       }
       fpRef.current = d.fingerprint;
+      sessionsRef.current = list;
       setSessions(list);
       return list;
     } catch (e) {
@@ -72,7 +73,25 @@ export default function App() {
     } finally {
       if (!quiet) setScanning(false);
     }
-  }, [roots, sessions]);
+  }, [roots]);
+
+  /** Reload the open graph after its transcript (or a child transcript) changes. */
+  const reloadActive = useCallback(async (list, force = false) => {
+    const a = activeRef.current;
+    if (!a) return;
+    const fresh = list.find((s) => s.file === a.file) || a;
+    if (!force && fresh.mtime === a.mtime) return;
+
+    try {
+      const suffix = force ? '&force=1' : '';
+      const r = await fetch('/api/session?file=' + encodeURIComponent(a.file) + suffix);
+      const d = await r.json();
+      if (d.error) return;
+      setActive(fresh);
+      setGraph(d);
+      if (followRef.current) setCursor(Math.max(0, d.events.length - 1));
+    } catch { /* the next watcher event or poll retries */ }
+  }, []);
 
   const select = useCallback(async (s, startAt = 0) => {
     setActive(s);
@@ -105,51 +124,90 @@ export default function App() {
   }, [roots]);
 
   /*
-   * Poller. The cheap pulse only re-stats known files; a full rescan walks the
-   * folders and is far slower, so it runs on a much longer interval and is what
-   * discovers brand-new sessions.
+   * Live updates use a filesystem watcher/SSE for immediate notification. The
+   * cheap pulse remains as a cross-platform/reconnect fallback, and the stable
+   * full-scan timer discovers files if recursive watching is unavailable.
    */
   useEffect(() => {
     if (!live || !roots.length) return;
     let stop = false;
     let lastFull = Date.now();
+    let running = false;
+    let eventDebounce = null;
+    let reconnect = null;
+    let source = null;
+    let pendingWatcherRefresh = false;
 
-    const tick = async () => {
-      if (stop || document.hidden) return;
+    const refresh = async ({ fromWatcher = false } = {}) => {
+      if (stop) return;
+      if (document.hidden) {
+        if (fromWatcher) pendingWatcherRefresh = true;
+        return;
+      }
+      if (running) {
+        if (fromWatcher) pendingWatcherRefresh = true;
+        return;
+      }
+      running = true;
 
       let changed = false;
       try {
-        const r = await fetch('/api/pulse?roots=' + encodeURIComponent(roots.join(';')));
-        const d = await r.json();
-        changed = pulseFpRef.current !== null && d.fingerprint !== pulseFpRef.current;
-        pulseFpRef.current = d.fingerprint;
-      } catch { return; }
+        if (!fromWatcher) {
+          const r = await fetch('/api/pulse?roots=' + encodeURIComponent(roots.join(';')));
+          const d = await r.json();
+          changed = pulseFpRef.current !== null && d.fingerprint !== pulseFpRef.current;
+          pulseFpRef.current = d.fingerprint;
+        }
 
-      const dueFull = Date.now() - lastFull > FULL_SCAN_MS;
-      if (!changed && !dueFull) return;
-      if (dueFull) lastFull = Date.now();
+        const dueFull = Date.now() - lastFull > FULL_SCAN_MS;
+        if (!fromWatcher && !changed && !dueFull) return;
+        if (dueFull || fromWatcher) lastFull = Date.now();
 
-      const list = await loadIndex(true);
-      const a = activeRef.current;
-      if (!a) return;
-      const fresh = list.find((s) => s.file === a.file);
-      if (!fresh || fresh.mtime === a.mtime) return;
-
-      // the open session changed: reload the graph, keeping the position
-      try {
-        const r = await fetch('/api/session?file=' + encodeURIComponent(a.file));
-        const d = await r.json();
-        if (d.error) return;
-        const old = graphRef.current?.events.length || 0;
-        setActive(fresh);
-        setGraph(d);
-        // if we were caught up with the end, stay caught up
-        if (follow && cursorRef.current >= old - 1.5) setCursor(Math.max(0, d.events.length - 1));
-      } catch { /* ignore */ }
+        const list = await loadIndex(true);
+        await reloadActive(list, fromWatcher);
+      } catch { /* fallback retries on the next interval */ }
+      finally {
+        running = false;
+        if (pendingWatcherRefresh && !stop) {
+          pendingWatcherRefresh = false;
+          eventDebounce = setTimeout(() => refresh({ fromWatcher: true }), 0);
+        }
+      }
     };
-    const h = setInterval(tick, POLL_MS);
-    return () => { stop = true; clearInterval(h); };
-  }, [live, follow, roots, loadIndex]);
+
+    const connect = () => {
+      if (stop) return;
+      source = new EventSource('/api/live?roots=' + encodeURIComponent(roots.join(';')));
+      source.addEventListener('change', () => {
+        clearTimeout(eventDebounce);
+        eventDebounce = setTimeout(() => refresh({ fromWatcher: true }), 100);
+      });
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        clearTimeout(reconnect);
+        reconnect = setTimeout(connect, 3000);
+      };
+    };
+
+    const onVisible = () => {
+      if (document.hidden) return;
+      const fromWatcher = pendingWatcherRefresh;
+      pendingWatcherRefresh = false;
+      refresh({ fromWatcher });
+    };
+    connect();
+    const h = setInterval(refresh, POLL_MS);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stop = true;
+      source?.close();
+      clearTimeout(eventDebounce);
+      clearTimeout(reconnect);
+      clearInterval(h);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [live, roots, loadIndex, reloadActive]);
 
   useEffect(() => {
     const onKey = (e) => {

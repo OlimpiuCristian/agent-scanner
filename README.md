@@ -90,12 +90,14 @@ scrolling.
 
 ## Live
 
-The **Live** checkbox checks the disk every 4 seconds — but it does not walk the folders again:
-a *pulse* only re-checks the files already known (**21 ms** for 256 files, against ~8 s for a
-full scan). The full scan runs once a minute and is the one that discovers new sessions.
+The **Live** checkbox watches the selected folders and streams filesystem changes to the browser,
+so transcript updates and new sessions normally appear immediately. A cheap 4-second *pulse*
+remains active as a fallback on filesystems without recursive watching or while the live stream
+reconnects. A stable full scan also runs once a minute as a final discovery fallback.
 
-Changed sessions get a `new` tag in the tree; if the open session grows, the graph reloads, and
-with **Follow** ticked the cursor jumps to the last event.
+Changed sessions get a `new` tag in the tree; if the open session grows, the graph reloads. With
+**Follow latest** ticked, every incoming update moves the cursor to the last event. **Live** owns
+data refresh; **Follow latest** only controls the open session's cursor.
 
 The index is incremental (a file is re-read only when its `mtime`/size changes) and it is saved
 to disk, so later starts are fast.

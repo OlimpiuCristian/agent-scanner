@@ -63,7 +63,7 @@ export default function RootPicker({ roots, suggestions, onChange, scanning, liv
       </button>
       <button onClick={onRescan} disabled={scanning || !roots.length}>{scanning ? 'Scanning…' : '↻ Rescan'}</button>
 
-      <label className="live" title="periodically check for new commands">
+      <label className="live" title="watch the selected folders for session changes">
         <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
         Live
       </label>
