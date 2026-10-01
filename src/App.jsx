@@ -4,6 +4,7 @@ import GraphView from './components/GraphView.jsx';
 import Timeline from './components/Timeline.jsx';
 import MessagePanel from './components/MessagePanel.jsx';
 import RootPicker from './components/RootPicker.jsx';
+import EventExplorer from './components/EventExplorer.jsx';
 
 const POLL_MS = 4000;        // cheap pulse: re-stat known files
 const FULL_SCAN_MS = 60000;  // full walk, to discover new sessions
@@ -28,6 +29,15 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(2);
   const [follow, setFollow] = useState(true);
+  const [explorerOpen, setExplorerOpen] = useState(true);
+  const explorerToggleRef = useRef(null);
+
+  const seekEvent = useCallback((index) => {
+    setPlaying(false);
+    setFollow(false);
+    followRef.current = false;
+    setCursor(index);
+  }, []);
 
   const fpRef = useRef(null);
   const pulseFpRef = useRef(null);
@@ -211,7 +221,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.target.closest('input, select, textarea, button, [contenteditable="true"]')) return;
       const n = graph?.events.length || 1;
       if (e.code === 'Space') { e.preventDefault(); setPlaying((p) => !p); }
       else if (e.code === 'ArrowRight') { setPlaying(false); setCursor((c) => Math.min(n - 1, Math.floor(c) + 1)); }
@@ -255,6 +265,10 @@ export default function App() {
             {graph?.gitBranch ? ' · ' + graph.gitBranch : ''}
             {graph ? ` · ${agentCount} agents · ${events.length} events` : ''}
           </span>
+          {graph && <button ref={explorerToggleRef} className={'chip' + (explorerOpen ? ' on' : '')}
+            aria-expanded={explorerOpen} aria-controls="event-explorer" onClick={() => setExplorerOpen((open) => !open)}>
+            Events <span>{events.length}</span>
+          </button>}
         </header>
 
         <MessagePanel current={current} nodes={graph?.nodes} />
@@ -270,7 +284,16 @@ export default function App() {
                 : 'Pick a session on the left.'}
           </div>
         )}
-        {!error && !loadingGraph && graph && <GraphView graph={graph} cursor={cursor} />}
+        {!error && !loadingGraph && graph && (
+          <div className={'session-workspace' + (explorerOpen ? ' with-explorer' : '')}>
+            <GraphView graph={graph} cursor={cursor} />
+            <EventExplorer key={active?.file} events={events} nodes={graph.nodes} cursor={cursor}
+              onSeek={seekEvent} open={explorerOpen} onClose={() => {
+                setExplorerOpen(false);
+                explorerToggleRef.current?.focus();
+              }} />
+          </div>
+        )}
 
         {graph && events.length > 0 && (
           <Timeline

@@ -84,9 +84,30 @@ recorded — there, sub-agents stay leaf nodes.
 | Speed | `0.5×` … `16×` |
 | Isolate an agent | hover over it (the rest fades) |
 | Switch session | the tree on the left (search by title, project or agent) |
+| Find an event | the **Events** panel: search messages, tool names or agents |
+| Review conversation / errors | **Conversation** or **Errors** in the Events panel |
+| Jump to a result | click an event, or use the panel's previous / next buttons |
 
 The current message is pinned at the top, with the sending agent's name above it, 5 lines and
 scrolling.
+
+The **Events** panel searches the loaded session's event content (as retained by the parser),
+including tool results. Matches show a highlighted excerpt; selecting one updates the graph,
+message and timeline together and pauses playback and **Follow latest** so live updates do not
+pull you away. **Live** keeps refreshing the data. Re-enable **Follow latest** to resume following
+incoming events. Results are paginated in groups of 60 for long sessions. Use the **Events**
+button in the header to hide or reopen the panel.
+On compact windows, the panel uses the graph's space; close it to return to the graph.
+
+UI regression checks use synthetic sessions and never scan personal folders:
+
+```bash
+npx playwright install chromium
+npm test
+```
+
+To use an installed browser instead, set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`)
+before running the tests.
 
 ## Live
 
@@ -125,6 +146,7 @@ src/
     RootPicker.jsx   top bar, folder browser
     GraphView.jsx    the radial graph (ring of agents) + the animation
     MessagePanel.jsx the current message, pinned at the top
+    EventExplorer.jsx searchable events, conversation/error filters and direct navigation
     Timeline.jsx     playback, event strip, scrubbing
 ```
 
